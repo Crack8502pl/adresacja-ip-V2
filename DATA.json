@@ -1,0 +1,16 @@
+[
+  {
+    "network": "172.16.0.0",
+    "mask": 25,
+    "rangeStart": "172.16.0.1",
+    "rangeEnd": "172.16.0.126",
+    "assignedTo": "Adresacja_a86e7450020c47e0bc5bb558ce03bcc4.csv"
+  },
+  {
+    "network": "172.16.0.128",
+    "mask": 25,
+    "rangeStart": "172.16.0.129",
+    "rangeEnd": "172.16.0.254",
+    "assignedTo": "Adresacja_34f747c8c8792adfb34be3dc7cfa39f3.csv"
+  }
+]
