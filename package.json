@@ -1,0 +1,19 @@
+{
+  "name": "adresacja-ip-V2",
+  "version": "1.0.1",
+  "description": "Automatyczny generator adresacji IP z obsługą zajętych pul - V2",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "csv-parse": "^5.6.0",
+    "csv-stringify": "^6.6.0",
+    "express": "^4.21.2",
+    "multer": "^1.4.4"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs"
+}

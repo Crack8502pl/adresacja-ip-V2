@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <title>Generator adresacji IP i nastawni</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="container">
+    <header>
+        <h1>Generator adresacji IP i nastawni</h1>
+        <p>Wgraj plik CSV z urządzeniami, wygeneruj adresację IP i konfigurację nastawni z obsługą LPR.</p>
+    </header>
+    
+    <section class="upload-section">
+        <form id="csvForm" enctype="multipart/form-data">
+            <div class="upload-box" onclick="document.getElementById('csvFile').click();">
+                <label for="csvFile" class="upload-label">
+                    <span class="upload-icon">📄</span>
+                    <span class="upload-text">Wybierz plik CSV do analizy</span>
+                </label>
+                <input type="file" id="csvFile" name="file" accept=".csv" style="display:none" required>
+            </div>
+            <div class="action-buttons" style="margin-top:18px;">
+                <button class="btn-primary" type="submit">Wyświetl podsumowanie</button>
+            </div>
+        </form>
+        <div id="error" class="error-message" style="display:none;"></div>
+    </section>
+
+    <section id="summarySection" class="input-section" style="display:none;">
+        <h3>Podsumowanie elementów do adresacji</h3>
+        <div class="priority-legend">
+            <h4>Legenda:</h4>
+            <div class="priority-item">
+                <span class="priority-color" style="background:#28a745"></span> Wiersz zostanie zaadresowany
+            </div>
+            <div class="priority-item">
+                <span class="priority-color" style="background:#dc3545"></span> Wiersz nie zostanie zaadresowany
+            </div>
+        </div>
+        <div class="table-container summary-scroll">
+            <table class="summary-table" id="summaryTable"></table>
+        </div>
+        
+        <!-- LPR Configuration Section -->
+        <div class="lpr-config" style="margin: 20px 0;">
+            <h4>Konfiguracja LPR</h4>
+            <div class="config-options">
+                <label>
+                    <input type="checkbox" id="lprEnabled" /> LPR-TAK
+                </label>
+                <label style="margin-left: 20px;">
+                    <input type="checkbox" id="redLightEnabled" /> RedLight-TAK
+                </label>
+            </div>
+        </div>
+        
+        <div class="action-buttons">
+            <button class="btn-primary" id="generateBtn">Generuj adresację i nastawnie</button>
+            <button class="btn-clear" id="cancelBtn">Anuluj</button>
+        </div>
+    </section>
+
+    <section id="resultSection" class="output-section" style="display:none;">
+        <h3>Adresacja i nastawnie wygenerowane</h3>
+        <div class="network-info" id="networkInfo"></div>
+        
+        <!-- Station Equipment Section -->
+        <div id="stationEquipmentSection" style="margin-top: 20px;">
+            <h4>Sprzęt nastawni</h4>
+            <div class="table-container">
+                <table class="result-table" id="stationEquipmentTable"></table>
+            </div>
+        </div>
+        
+        <div class="table-container">
+            <table class="result-table" id="resultTable"></table>
+        </div>
+        <div class="action-buttons">
+            <a class="btn-secondary" id="downloadBtn" href="#" download>📥 Pobierz plik CSV</a>
+            <button class="btn-info" id="newBtn">Nowy plik</button>
+        </div>
+    </section>
+</div>
+
+<script>
+// Constants and global variables
+const DISK_CAPACITIES = {
+    '8TB': 8000,
+    '12TB': 12000,
+    '16TB': 16000
+};
+
+let globalCsvData = null;
+
+/* Obsługa uploadu pliku i podsumowania */
+document.getElementById('csvForm').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    document.getElementById('error').style.display = 'none';
+    document.getElementById('error').innerText = '';
+    document.getElementById('summarySection').style.display = 'none';
+    document.getElementById('resultSection').style.display = 'none';
+
+    const fileInput = document.getElementById('csvFile');
+    if (!fileInput.files.length) {
+        document.getElementById('error').innerText = 'Proszę wybrać plik CSV!';
+        document.getElementById('error').style.display = '';
+        return;
+    }
+
+    const formData = new FormData(this);
+    this.classList.add('loading');
+    try {
+        const res = await fetch('/summary', {
+            method: 'POST',
+            body: formData
+        });
+        this.classList.remove('loading');
+        if (!res.ok) {
+            const err = await res.json();
+            document.getElementById('error').innerText = err.error || 'Błąd podczas przetwarzania pliku.';
+            document.getElementById('error').style.display = '';
+            return;
+        }
+        const data = await res.json();
+        window.fileId = data.fileId;
+        globalCsvData = data.summary;
+        renderSummary(data.summary);
+    } catch (error) {
+        this.classList.remove('loading');
+        document.getElementById('error').innerText = 'Błąd podczas przetwarzania pliku: ' + error.message;
+        document.getElementById('error').style.display = '';
+    }
+});
+
+/* Renderowanie podsumowania z kolorami */
+function renderSummary(rows) {
+    const table = document.getElementById('summaryTable');
+    table.innerHTML = `<tr>
+        <th>Nazwa Obiektu</th>
+        <th>Kategoria</th>
+        <th>Nazwa</th>
+        <th>Ilość</th>
+        <th>Klasa</th>
+    </tr>`;
+    rows.forEach(row => {
+        const rowClass = row.included ? "included-row" : "excluded-row";
+        table.innerHTML += `<tr class="${rowClass}">
+            <td>${row.nazwaObiektu}</td>
+            <td>${row.Kategoria || row.kategoria || ""}</td>
+            <td>${row.Nazwa || row.nazwa || ""}</td>
+            <td>${row.Ilość ? row.Ilość : (row.Ilosc ? row.Ilosc : "")}</td>
+            <td>${row.Klasa || row.klasa || ""}</td>
+        </tr>`;
+    });
+    document.getElementById('summarySection').style.display = '';
+}
+
+/* Helper functions for station equipment generation */
+function countCameraSets() {
+    if (!globalCsvData) return 0;
+    return globalCsvData.filter(row => 
+        row.included && 
+        (row.nazwa.includes('U1532') || row.nazwa.includes('S1536LTN'))
+    ).reduce((sum, row) => sum + (parseInt(row.Ilość || row.Ilosc) || 1), 0);
+}
+
+function countU1532CamerasInKATObjects() {
+    if (!globalCsvData) return 0;
+    return globalCsvData.filter(row => 
+        row.included && 
+        row.nazwa.includes('U1532') && 
+        (row.Kategoria === 'KAT A' || row.Kategoria === 'KAT B')
+    ).reduce((sum, row) => sum + (parseInt(row.Ilość || row.Ilosc) || 1), 0);
+}
+
+function countSKPAndKATACameras() {
+    if (!globalCsvData) return 0;
+    return globalCsvData.filter(row => 
+        row.included && 
+        (row.Kategoria === 'SKP' || row.Kategoria === 'KAT A')
+    ).reduce((sum, row) => sum + (parseInt(row.Ilość || row.Ilosc) || 1), 0);
+}
+
+function generateNastawniaEquipment() {
+    const lprEnabled = document.getElementById('lprEnabled').checked;
+    const redLightEnabled = document.getElementById('redLightEnabled').checked;
+    const equipment = [];
+    
+    if (lprEnabled) {
+        const cameraSets = countCameraSets();
+        const allCameras = countSKPAndKATACameras();
+        const u1532Cameras = countU1532CamerasInKATObjects();
+        
+        // Server configuration based on LPR and RedLight settings
+        let maxSetsPerServer, ssvLicenses, vcaLicenses;
+        
+        if (redLightEnabled) {
+            // LPR-TAK, RedLight-tak
+            maxSetsPerServer = 4;
+            ssvLicenses = Math.max(8, allCameras);
+            vcaLicenses = u1532Cameras;
+        } else {
+            // LPR-TAK, RedLight-nie
+            maxSetsPerServer = 12;
+            ssvLicenses = Math.max(8, allCameras);
+            vcaLicenses = 0;
+        }
+        
+        // Calculate number of servers needed
+        const serversNeeded = Math.ceil(cameraSets / maxSetsPerServer);
+        
+        // Add servers
+        for (let i = 1; i <= serversNeeded; i++) {
+            equipment.push({
+                nazwa: `Serwer LPR ${i}`,
+                klasa: "Klasa-0",
+                typ: "serwer",
+                opis: `Serwer dla zestawu kamer U1532/S1536LTN (max ${maxSetsPerServer} zestawów)`
+            });
+        }
+        
+        // Add SSV licenses
+        if (ssvLicenses > 0) {
+            equipment.push({
+                nazwa: "Licencja SSV",
+                klasa: "Klasa-0",
+                typ: "licencja",
+                ilosc: ssvLicenses,
+                opis: `Licencja SSV dla ${ssvLicenses} kamer (min. 8)`
+            });
+        }
+        
+        // Add VCA licenses
+        if (vcaLicenses > 0) {
+            equipment.push({
+                nazwa: "Licencja VCA", 
+                klasa: "Klasa-0",
+                typ: "licencja",
+                ilosc: vcaLicenses,
+                opis: `Licencja VCA dla ${vcaLicenses} kamer U1532 w obiektach KAT A/B`
+            });
+        }
+    }
+    
+    return equipment;
+}
+
+/* Obsługa generowania adresacji i nastawni */
+document.getElementById('generateBtn').addEventListener('click', async function() {
+    document.getElementById('error').style.display = 'none';
+    document.getElementById('error').innerText = '';
+    this.classList.add('loading');
+    
+    try {
+        // Generate station equipment
+        const stationEquipment = generateNastawniaEquipment();
+        
+        // Generate IP addressing
+        const res = await fetch('/generate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+                fileId: window.fileId,
+                lprEnabled: document.getElementById('lprEnabled').checked,
+                redLightEnabled: document.getElementById('redLightEnabled').checked
+            })
+        });
+        
+        this.classList.remove('loading');
+        if (!res.ok) {
+            const err = await res.json();
+            document.getElementById('error').innerText = err.error || 'Błąd generacji adresacji.';
+            document.getElementById('error').style.display = '';
+            return;
+        }
+        const data = await res.json();
+        data.stationEquipment = stationEquipment;
+        renderResult(data);
+    } catch (error) {
+        this.classList.remove('loading');
+        document.getElementById('error').innerText = 'Błąd generacji: ' + error.message;
+        document.getElementById('error').style.display = '';
+    }
+});
+
+/* Przycisk Anuluj = reset strony */
+document.getElementById('cancelBtn').addEventListener('click', function() {
+    location.reload();
+});
+
+/* Renderowanie wyniku generacji adresacji + parametry podsieci + sprzęt nastawni */
+function renderResult(data) {
+    document.getElementById('summarySection').style.display = 'none';
+    document.getElementById('resultSection').style.display = '';
+    
+    // Network information
+    document.getElementById('networkInfo').innerHTML = `
+        <div class="info-grid">
+            <div class="info-item"><label>Nazwa podsieci:</label> <span>${data.siecNazwa}</span></div>
+            <div class="info-item"><label>Adres podsieci:</label> <span>${data.network}/${data.mask}</span></div>
+            <div class="info-item"><label>Adres bramy:</label> <span>${data.rangeStart}</span></div>
+            <div class="info-item"><label>Maska:</label> <span>${data.subnetMask}</span></div>
+            <div class="info-item"><label>Liczba użytych adresów:</label> <span>${data.used}</span></div>
+            <div class="info-item"><label>Zapas adresów:</label> <span>${data.reserve}</span></div>
+            <div class="info-item"><label>Prefiks:</label> <span>${data.prefix}</span></div>
+        </div>
+    `;
+
+    // Station equipment table
+    if (data.stationEquipment && data.stationEquipment.length > 0) {
+        const stationTable = document.getElementById('stationEquipmentTable');
+        stationTable.innerHTML = `<tr>
+            <th>Nazwa</th>
+            <th>Klasa</th>
+            <th>Typ</th>
+            <th>Ilość</th>
+            <th>Opis</th>
+        </tr>`;
+        data.stationEquipment.forEach(item => {
+            stationTable.innerHTML += `<tr>
+                <td>${item.nazwa}</td>
+                <td>${item.klasa}</td>
+                <td>${item.typ}</td>
+                <td>${item.ilosc || 1}</td>
+                <td>${item.opis || ''}</td>
+            </tr>`;
+        });
+        document.getElementById('stationEquipmentSection').style.display = '';
+    } else {
+        document.getElementById('stationEquipmentSection').style.display = 'none';
+    }
+    
+    // IP addressing table
+    const table = document.getElementById('resultTable');
+    table.innerHTML = `<tr>
+        <th>Nazwa Obiektu</th>
+        <th>Kategoria</th>
+        <th>Nazwa</th>
+        <th>Adres ip V4</th>
+        <th>Maska</th>
+        <th>Brama domyślna</th>
+        <th>Serwer NTP</th>
+    </tr>`;
+    data.rows.forEach(row => {
+        table.innerHTML += `<tr>
+            <td>${row['Nazwa Obiektu']}</td>
+            <td>${row['Kategoria']}</td>
+            <td>${row['Nazwa']}</td>
+            <td>${row['Adres ip V4']}</td>
+            <td>${row['Maska']}</td>
+            <td>${row['Brama domyślna']}</td>
+            <td>${row['Serwer NTP']}</td>
+        </tr>`;
+    });
+    
+    const downloadBtn = document.getElementById('downloadBtn');
+    downloadBtn.href = `/download/${encodeURIComponent(data.fileName)}`;
+    downloadBtn.style.display = '';
+}
+
+/* Przycisk Nowy plik = reset strony */
+document.getElementById('newBtn').addEventListener('click', function() {
+    location.reload();
+});
+
+/* Kliknięcie na upload box otwiera okno wyboru pliku */
+document.querySelector('.upload-box').addEventListener('click', function() {
+    document.getElementById('csvFile').click();
+});
+</script>
+</body>
+</html>
